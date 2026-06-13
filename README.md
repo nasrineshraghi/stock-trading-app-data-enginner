@@ -1,5 +1,7 @@
 # Stock Data Pipeline
 
+[![CI](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml/badge.svg)](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml)
+
 Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate data quality, and save to CSV — with tests and CI/CD baked in.
 
 ## Architecture
@@ -63,9 +65,45 @@ Failed checks block the processed CSV from being written and raise `DataQualityE
 
 ## Development
 
+### Run tests locally before changes
+
+From the project folder:
+
 ```bash
-make lint          # ruff
+source .venv/bin/activate
+```
+
+If you haven't set up the environment yet:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Before you commit, run the same checks as CI:
+
+```bash
+make lint          # ruff — must pass with no errors
 make test          # pytest with coverage (≥80% required in CI)
+```
+
+Or run them directly:
+
+```bash
+ruff check src tests
+pytest tests/ --cov=stock_pipeline --cov-report=term-missing
+```
+
+Quick test run (no coverage report):
+
+```bash
+pytest tests/ -q
+```
+
+Typical workflow: edit code → `make lint` → `make test` → commit → push.
+
+```bash
 make ingest TICKER=AAPL START=2024-01-01 END=2024-01-31
 ```
 
