@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     polygon_api_key: str = Field(..., min_length=1)
     polygon_base_url: str = "https://api.polygon.io"
     data_dir: Path = Path("./data")
+    incremental_lookback_days: int = 30  # first run: load last N days if no history
 
     snowflake_account: str | None = None
     snowflake_user: str | None = None

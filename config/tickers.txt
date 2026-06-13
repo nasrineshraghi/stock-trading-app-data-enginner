@@ -1,0 +1,4 @@
+# One ticker symbol per line. Lines starting with # are ignored.
+AAPL
+MSFT
+GOOG

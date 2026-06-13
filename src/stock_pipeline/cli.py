@@ -5,7 +5,9 @@ from pathlib import Path
 
 import typer
 
+from stock_pipeline.config import get_settings
 from stock_pipeline.extract.polygon import PolygonExtractError
+from stock_pipeline.incremental import IncrementalSkip, resolve_incremental_range
 from stock_pipeline.load.snowflake_loader import SnowflakeLoadError
 from stock_pipeline.logging_config import setup_logging
 from stock_pipeline.pipeline import (
@@ -30,6 +32,33 @@ def _parse_dates(start: str, end: str) -> tuple[date, date]:
     if start_date > end_date:
         raise typer.BadParameter("--start must be on or before --end")
     return start_date, end_date
+
+
+def _resolve_dates(
+    tickers: list[str],
+    *,
+    start: str | None,
+    end: str | None,
+    incremental: bool,
+) -> tuple[date, date]:
+    if incremental:
+        end_override = date.fromisoformat(end) if end else None
+        try:
+            start_date, end_date = resolve_incremental_range(
+                tickers[0],
+                get_settings(),
+                end_date=end_override,
+            )
+        except IncrementalSkip as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(0) from exc
+        typer.echo(f"Incremental range: {start_date} -> {end_date}")
+        return start_date, end_date
+
+    if start and end:
+        return _parse_dates(start, end)
+
+    raise typer.BadParameter("Provide --start and --end, or use --incremental")
 
 
 def _load_tickers_file(path: Path) -> list[str]:
@@ -70,12 +99,7 @@ def _print_batch_summary(batch_result) -> None:
 
 @app.callback()
 def main(
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable debug logging (place before command: stock-ingest -v ingest ...)",
-    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     setup_logging(verbose=verbose)
 
@@ -83,8 +107,13 @@ def main(
 @app.command()
 def ingest(
     tickers: list[str] = typer.Argument(..., help="One or more ticker symbols, e.g. AAPL MSFT"),
-    start: str = typer.Option(..., "--start", help="Start date YYYY-MM-DD"),
-    end: str = typer.Option(..., "--end", help="End date YYYY-MM-DD"),
+    start: str | None = typer.Option(None, "--start", help="Start date YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="End date YYYY-MM-DD"),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help="Load only dates after the last successful ingest",
+    ),
     snowflake: bool = typer.Option(
         False,
         "--snowflake",
@@ -94,7 +123,7 @@ def ingest(
 ) -> None:
     """Extract, validate, and export OHLCV bars to CSV."""
     setup_logging(verbose=verbose)
-    start_date, end_date = _parse_dates(start, end)
+    start_date, end_date = _resolve_dates(tickers, start=start, end=end, incremental=incremental)
 
     if len(tickers) == 1:
         try:
@@ -115,7 +144,13 @@ def ingest(
         _print_result(result)
         return
 
-    batch_result = _run_batch(tickers, start_date, end_date, snowflake=snowflake)
+    batch_result = _run_batch(
+        tickers,
+        start_date,
+        end_date,
+        snowflake=snowflake,
+        incremental=incremental,
+    )
     _print_batch_summary(batch_result)
     if batch_result.failures:
         raise typer.Exit(1)
@@ -124,8 +159,13 @@ def ingest(
 @app.command("ingest-batch")
 def ingest_batch(
     tickers_file: Path = typer.Argument(..., help="Path to tickers file (one symbol per line)"),
-    start: str = typer.Option(..., "--start", help="Start date YYYY-MM-DD"),
-    end: str = typer.Option(..., "--end", help="End date YYYY-MM-DD"),
+    start: str | None = typer.Option(None, "--start", help="Start date YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="End date YYYY-MM-DD"),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help="Load only dates after the last successful ingest",
+    ),
     snowflake: bool = typer.Option(
         False,
         "--snowflake",
@@ -135,21 +175,46 @@ def ingest_batch(
 ) -> None:
     """Ingest multiple tickers listed in a file."""
     setup_logging(verbose=verbose)
-    start_date, end_date = _parse_dates(start, end)
     tickers = _load_tickers_file(tickers_file)
-    batch_result = _run_batch(tickers, start_date, end_date, snowflake=snowflake)
+
+    if incremental:
+        batch_result = _run_batch(
+            tickers,
+            date.today(),
+            date.today(),
+            snowflake=snowflake,
+            incremental=True,
+        )
+    else:
+        start_date, end_date = _resolve_dates(tickers, start=start, end=end, incremental=False)
+        batch_result = _run_batch(
+            tickers,
+            start_date,
+            end_date,
+            snowflake=snowflake,
+            incremental=False,
+        )
+
     _print_batch_summary(batch_result)
     if batch_result.failures:
         raise typer.Exit(1)
 
 
-def _run_batch(tickers: list[str], start_date: date, end_date: date, *, snowflake: bool):
+def _run_batch(
+    tickers: list[str],
+    start_date: date,
+    end_date: date,
+    *,
+    snowflake: bool,
+    incremental: bool = False,
+):
     try:
         return run_batch_ingestion_pipeline(
             tickers,
             start_date,
             end_date,
             load_to_snowflake=snowflake,
+            incremental=incremental,
         )
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)

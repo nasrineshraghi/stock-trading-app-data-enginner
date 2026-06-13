@@ -112,7 +112,10 @@ def run_batch_ingestion_pipeline(
     *,
     settings: Settings | None = None,
     load_to_snowflake: bool = False,
+    incremental: bool = False,
 ) -> BatchPipelineResult:
+    from stock_pipeline.incremental import IncrementalSkip, resolve_incremental_range
+
     settings = settings or get_settings()
     results: list[PipelineResult] = []
     failures: list[tuple[str, str]] = []
@@ -127,11 +130,20 @@ def run_batch_ingestion_pipeline(
             if not symbol:
                 continue
             try:
+                ticker_start = start_date
+                ticker_end = end_date
+                if incremental:
+                    try:
+                        ticker_start, ticker_end = resolve_incremental_range(symbol, settings)
+                    except IncrementalSkip as exc:
+                        logger.info(str(exc))
+                        continue
+
                 results.append(
                     run_ingestion_pipeline(
                         symbol,
-                        start_date,
-                        end_date,
+                        ticker_start,
+                        ticker_end,
                         settings=settings,
                         client=client,
                         load_to_snowflake=load_to_snowflake,

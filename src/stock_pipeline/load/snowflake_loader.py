@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 import pandas as pd
 
@@ -181,3 +182,24 @@ def load_dataframe_to_snowflake(
         table=settings.snowflake_table,
         rows_loaded=nrows,
     )
+
+
+def get_last_loaded_date(ticker: str, settings: Settings) -> date | None:
+    """Query MAX(DATE) for this ticker from Snowflake."""
+    settings.require_snowflake_settings()
+    conn = _connect(settings)
+    table = _qualified_table(settings, settings.snowflake_table)
+    try:
+        sql = f"""
+            SELECT MAX(DATE) AS LAST_DATE
+            FROM {table}
+            WHERE TICKER = %s
+        """
+        with conn.cursor() as cursor:
+            cursor.execute(sql, (ticker.upper(),))
+            row = cursor.fetchone()
+        if row and row[0]:
+            return row[0]  # already a date
+        return None
+    finally:
+        conn.close()

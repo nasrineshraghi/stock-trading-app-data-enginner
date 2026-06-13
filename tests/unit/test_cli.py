@@ -52,3 +52,45 @@ def test_ingest_command_success(httpx_mock, polygon_response, monkeypatch, tmp_p
     assert result.exit_code == 0
     assert "Ingested 2 rows" in result.stdout
     assert (tmp_path / "data" / "processed" / "AAPL_2024-01-01_2024-01-31.csv").exists()
+
+
+def test_ingest_requires_dates_without_incremental():
+    result = runner.invoke(app, ["ingest", "AAPL"])
+
+    assert result.exit_code != 0
+    assert "Provide --start and --end" in result.output
+
+
+def test_ingest_incremental_skips_when_up_to_date(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("POLYGON_API_KEY", "test-key")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    from stock_pipeline.incremental import IncrementalSkip
+
+    def _raise_skip(*args, **kwargs):
+        raise IncrementalSkip("AAPL is already up to date")
+
+    monkeypatch.setattr("stock_pipeline.cli.resolve_incremental_range", _raise_skip)
+
+    result = runner.invoke(app, ["ingest", "AAPL", "--incremental"])
+
+    assert result.exit_code == 0
+    assert "already up to date" in result.stdout
+
+
+def test_ingest_batch_from_file(httpx_mock, polygon_response, monkeypatch, tmp_path: Path):
+    httpx_mock.add_response(json=polygon_response)
+    httpx_mock.add_response(json=polygon_response)
+    monkeypatch.setenv("POLYGON_API_KEY", "test-key")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    tickers_file = tmp_path / "tickers.txt"
+    tickers_file.write_text("AAPL\nMSFT\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["ingest-batch", str(tickers_file), "--start", "2024-01-01", "--end", "2024-01-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "Batch summary: 2 succeeded, 0 failed" in result.stdout

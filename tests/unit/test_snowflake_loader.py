@@ -5,6 +5,7 @@ import pytest
 from stock_pipeline.config import Settings
 from stock_pipeline.load.snowflake_loader import (
     SnowflakeLoadError,
+    get_last_loaded_date,
     load_dataframe_to_snowflake,
 )
 
@@ -56,6 +57,23 @@ def test_load_dataframe_to_snowflake(
 def test_load_dataframe_to_snowflake_requires_config(sample_ohlcv_df, test_settings):
     with pytest.raises(RuntimeError, match="Snowflake is not fully configured"):
         load_dataframe_to_snowflake(sample_ohlcv_df, test_settings)
+
+
+@patch("stock_pipeline.load.snowflake_loader._connect")
+@patch("stock_pipeline.load.snowflake_loader.snowflake")
+def test_get_last_loaded_date_returns_max_date(
+    _mock_snowflake_module, mock_connect, snowflake_settings
+):
+    from datetime import date
+
+    mock_conn, mock_cursor = _mock_connection()
+    mock_connect.return_value = mock_conn
+    mock_cursor.fetchone.return_value = (date(2025, 6, 5),)
+
+    assert get_last_loaded_date("AAPL", snowflake_settings) == date(2025, 6, 5)
+    mock_conn.close.assert_called_once()
+
+
 @patch("stock_pipeline.load.snowflake_loader.write_pandas")
 @patch("stock_pipeline.load.snowflake_loader._connect")
 @patch("stock_pipeline.load.snowflake_loader.snowflake")
