@@ -57,6 +57,7 @@ def test_load_dataframe_to_snowflake(
 
 
 def test_load_dataframe_to_snowflake_requires_config(sample_ohlcv_df, test_settings):
+    assert not test_settings.snowflake_configured
     with pytest.raises(RuntimeError, match="Snowflake is not fully configured"):
         load_dataframe_to_snowflake(sample_ohlcv_df, test_settings)
 
