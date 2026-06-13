@@ -7,7 +7,7 @@ Level 1 got data **into** Snowflake. Level 2 makes the pipeline **production-sha
 | 1 | Incremental loads (`--incremental`) | Done |
 | 2 | dbt models on `STOCK_OHLCV` | Done |
 | 3 | Scheduled GitHub Actions (cron) | Done |
-| 4 | Docker packaging | **Next** |
+| 4 | Docker packaging | Done |
 
 ---
 
@@ -171,16 +171,52 @@ SELECT COUNT(*) FROM STOCK_DB.MARTS.FCT_STOCK_DAILY_RETURNS;
 
 ---
 
-## Block 4 preview — Docker
+## Block 4 — Docker
 
-Wrap the CLI in a slim image, mount `.env` or inject secrets at runtime, use the same entrypoint as local:
+### Goal
 
-```dockerfile
-FROM python:3.12-slim
-COPY . /app
-RUN pip install -e ".[snowflake]"
-ENTRYPOINT ["stock-ingest"]
+Run the same CLI in a container — useful for reproducible local runs, demos, and future deployment without installing Python deps on the host.
+
+### 4.1 Files
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Python 3.12 slim image with `stock-ingest` + Snowflake extras |
+| `.dockerignore` | Keeps secrets, venv, and dbt artifacts out of the image |
+
+### 4.2 Build
+
+```bash
+make docker-build
+# or: docker build -t stock-pipeline .
 ```
+
+### 4.3 Run ingest in Docker
+
+Pass secrets with `--env-file` (never bake `.env` into the image). Mount `data/` so CSVs persist on your machine:
+
+```bash
+# CSV only
+docker run --rm --env-file .env -v $(pwd)/data:/app/data stock-pipeline \
+  ingest AAPL --start 2025-06-01 --end 2025-06-05
+
+# Incremental → Snowflake (same as GitHub Actions)
+make docker-ingest-batch
+```
+
+Single-ticker with Snowflake:
+
+```bash
+make docker-ingest TICKER=AAPL START=2025-06-01 END=2025-06-05 SNOWFLAKE=1
+```
+
+dbt is **not** in the default image (keeps it small). Run dbt on the host or extend the Dockerfile with `pip install -e ".[dbt,snowflake]"` if needed.
+
+### 4.4 Acceptance criteria
+
+- [ ] `make docker-build` succeeds
+- [ ] `docker run ... ingest AAPL ...` writes CSVs under `./data`
+- [ ] `make docker-ingest-batch` upserts to Snowflake with `.env` credentials
 
 ---
 

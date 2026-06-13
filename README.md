@@ -1,313 +1,217 @@
-# Stock Data Pipeline
+# Polygon → Snowflake OHLCV Pipeline
+
+**A production-style stock data pipeline for learning and portfolios** — ingest daily OHLCV bars from [Polygon.io](https://polygon.io), enforce data quality with Pandera, load into Snowflake with idempotent MERGE, model analytics in dbt, and refresh on a schedule with GitHub Actions.
 
 [![CI](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml/badge.svg)](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml)
 
-Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate data quality, save to CSV, load into Snowflake, transform with dbt, and refresh on a schedule — with tests and CI/CD baked in.
+| | |
+|---|---|
+| **Data source** | Polygon.io REST API (`/v2/aggs`) |
+| **Warehouse** | Snowflake (`STOCK_DB`) |
+| **Transform** | dbt (staging view + daily returns mart) |
+| **Automation** | GitHub Actions cron + Docker |
+| **Quality** | Pandera schema + OHLC business rules, ~87% test coverage |
 
-**Practice guide:** see [docs/LEVEL1.md](docs/LEVEL1.md) for step-by-step production-ready exercises (logging, batch ingest, Snowflake upsert, CI quality gates).
+**Step-by-step guides:** [Level 1 — ingest & Snowflake](docs/LEVEL1.md) · [Level 2 — incremental, dbt, cron, Docker](docs/LEVEL2.md)
 
-**Level 2 (dbt, cron, Docker):** see [docs/LEVEL2.md](docs/LEVEL2.md).
+---
+
+## What this project does
+
+End-to-end **ELT** for US equity daily bars:
+
+1. **Extract** OHLCV from Polygon for one or many tickers  
+2. **Validate** prices, volumes, and OHLC logic before anything is persisted  
+3. **Load** raw + processed CSVs locally, then **MERGE** into Snowflake on `(ticker, date)`  
+4. **Transform** with dbt into a staging view and a mart with `daily_return_pct`  
+5. **Automate** incremental loads on a cron (and optionally run the same CLI in Docker)
+
+Built to demonstrate patterns hiring managers expect: incremental loads, upserts, tests, CI, analytics modeling, and scheduled jobs — without hiding complexity behind a notebook.
+
+---
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  subgraph extract["Extract & validate (Python)"]
+    P[Polygon.io API] --> E[Extract]
+    E --> T[Normalize schema]
+    T --> Q[Pandera quality gates]
+    Q --> C[CSV raw + processed]
+  end
+
+  subgraph load["Load (Snowflake)"]
+    C --> R[(RAW_DATA_STOCK\nSTOCK_OHLCV)]
+  end
+
+  subgraph transform["Transform (dbt)"]
+    R --> S[STAGING\nSTG_STOCK_OHLCV]
+    S --> M[MARTS\nFCT_STOCK_DAILY_RETURNS]
+  end
+
+  subgraph ops["Operations"]
+    GH[GitHub Actions\ncron + secrets] --> extract
+    GH --> transform
+    DK[Docker\nstock-pipeline image] -.-> extract
+  end
 ```
-Polygon.io  →  Python ELT (extract → validate → CSV)  →  Snowflake RAW_DATA_STOCK.STOCK_OHLCV
-                                                                    ↓
-                                                          dbt: STAGING → MARTS
-                                                                    ↑
-                                              GitHub Actions cron (incremental ingest + dbt)
-```
 
-| Layer | Module | Responsibility |
-|-------|--------|----------------|
-| Extract | `stock_pipeline.extract.polygon` | Fetch aggregates from Polygon `/v2/aggs` |
-| Transform | `stock_pipeline.transform.normalize` | Normalize to canonical OHLCV schema |
-| Quality | `stock_pipeline.quality` | Pandera schema + OHLC business rules |
-| Load | `stock_pipeline.load.csv_exporter` | Write versioned CSV files |
-| Load | `stock_pipeline.load.snowflake_loader` | MERGE upsert on `(ticker, date)` |
-| Incremental | `stock_pipeline.incremental` | Load only dates after last successful ingest |
-| Orchestration | `stock_pipeline.pipeline` | End-to-end ingestion workflow |
-| CLI | `stock_pipeline.cli` | `ingest`, `ingest-batch`, `validate` |
-| Analytics | `dbt/` | Staging view + daily returns mart + schema tests |
-| Automation | `.github/workflows/scheduled-ingest.yml` | Cron + manual: incremental ingest + dbt |
+### Snowflake layers
 
-## API reference
+| Schema | Object | Role |
+|--------|--------|------|
+| `RAW_DATA_STOCK` | `STOCK_OHLCV` | Raw OHLCV from Python MERGE (source of truth) |
+| `STAGING` | `STG_STOCK_OHLCV` | dbt view — cleaned column names, typed fields |
+| `MARTS` | `FCT_STOCK_DAILY_RETURNS` | dbt table — daily % return vs previous close |
 
-This pipeline uses the Polygon.io aggregates (OHLCV bars) REST API. For endpoint details, parameters, and response formats, see the [Massive Stocks REST API documentation](https://massive.com/docs/rest/stocks/overview).
+### Snowflake preview
 
-The client calls:
+Raw layer after ingest (`STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV`):
 
-```
-GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}
-```
+![Snowflake raw OHLCV table with MSFT daily bars](docs/assets/snowflake-raw-ohlcv.png)
+
+*Polygon-sourced bars with quality metadata (`source`, `ingested_at`). Analytics models live in `STAGING` and `MARTS` — see [Level 2](docs/LEVEL2.md).*
+
+Add more screenshots under `docs/assets/` (e.g. mart query results, dbt test output) and link them here.
+
+---
 
 ## Quick start
 
 ### 1. Install
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,snowflake]"
+cp .env.example .env   # add POLYGON_API_KEY (+ SNOWFLAKE_* for warehouse load)
 ```
 
-For Snowflake loading, also install:
-
-```bash
-pip install -e ".[snowflake]"
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set at minimum:
-
-```bash
-POLYGON_API_KEY=your_key_here
-```
-
-**Important:** put real secrets in `.env` only (gitignored). Keep `.env.example` as placeholders.
-
-If your password contains `#` or other special characters, wrap it in quotes:
-
-```bash
-SNOWFLAKE_PASSWORD="your#password"
-```
-
-### 3. Run ingestion (CSV)
-
-Use dates within your Polygon plan window (free tier is typically ~2 years of history):
+### 2. Ingest to CSV
 
 ```bash
 stock-ingest ingest AAPL --start 2025-06-01 --end 2025-06-05
-```
-
-Output files:
-
-- `data/raw/AAPL_2025-06-01_2025-06-05.csv` — normalized extract
-- `data/processed/AAPL_2025-06-01_2025-06-05.csv` — quality-validated output
-
-Success output:
-
-```
-Ingested 3 rows for AAPL
-Raw CSV:        data/raw/AAPL_2025-06-01_2025-06-05.csv
-Processed CSV:  data/processed/AAPL_2025-06-01_2025-06-05.csv
-Quality checks: schema: ticker, date, ohlcv columns, ...
-```
-
-### 4. Validate an existing CSV
-
-```bash
 stock-ingest validate data/processed/AAPL_2025-06-01_2025-06-05.csv
 ```
 
-### 5. Load into Snowflake (optional)
-
-Add Snowflake settings to `.env`:
-
-```bash
-SNOWFLAKE_ACCOUNT=your_org-your_account
-SNOWFLAKE_USER=your_username
-SNOWFLAKE_PASSWORD=your_password
-SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=STOCK_DB
-SNOWFLAKE_SCHEMA=RAW_DATA_STOCK
-SNOWFLAKE_TABLE=STOCK_OHLCV
-```
-
-Create objects in Snowflake (run once):
-
-```sql
-CREATE DATABASE IF NOT EXISTS STOCK_DB;
-CREATE SCHEMA IF NOT EXISTS STOCK_DB.RAW_DATA_STOCK;
-
-CREATE WAREHOUSE IF NOT EXISTS COMPUTE_WH
-  WAREHOUSE_SIZE = 'XSMALL'
-  AUTO_SUSPEND = 60
-  AUTO_RESUME = TRUE;
-
-GRANT USAGE ON WAREHOUSE COMPUTE_WH TO USER your_username;
-GRANT USAGE ON DATABASE STOCK_DB TO USER your_username;
-GRANT USAGE ON SCHEMA STOCK_DB.RAW_DATA_STOCK TO USER your_username;
-GRANT CREATE TABLE ON SCHEMA STOCK_DB.RAW_DATA_STOCK TO USER your_username;
-GRANT INSERT ON ALL TABLES IN SCHEMA STOCK_DB.RAW_DATA_STOCK TO USER your_username;
-```
-
-Run ingest with the Snowflake flag:
-
-```bash
-stock-ingest ingest AAPL --start 2025-06-01 --end 2025-06-05 --snowflake
-```
-
-Incremental load (only new dates since last run in Snowflake or CSV):
+### 3. Load to Snowflake
 
 ```bash
 stock-ingest ingest AAPL --incremental --snowflake
 stock-ingest ingest-batch config/tickers.example.txt --incremental --snowflake
 ```
 
-Verify in Snowflake:
+One-time Snowflake setup (database, schema, grants): [Level 1 guide](docs/LEVEL1.md).
 
-```sql
-SELECT * FROM STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV ORDER BY DATE;
-```
-
-The table `STOCK_OHLCV` is created automatically on first load if it does not exist.
-
-### 6. dbt analytics (optional)
-
-Transform raw Snowflake data into staging and mart models. See [docs/LEVEL2.md](docs/LEVEL2.md) for full setup.
+### 4. dbt analytics
 
 ```bash
-pip install -e ".[dbt,snowflake]"
-cp dbt/profiles.yml.example dbt/profiles.yml   # or rely on env vars + --profiles-dir .
+pip install -e ".[dbt]"
+cp dbt/profiles.yml.example dbt/profiles.yml
 export $(grep -v '^#' .env | xargs)
 
-make dbt-run    # STAGING.STG_STOCK_OHLCV (view)
-make dbt-test   # MARTS.FCT_STOCK_DAILY_RETURNS (table + tests)
+make dbt-run && make dbt-test
 ```
 
-```sql
-SELECT * FROM STOCK_DB.STAGING.STG_STOCK_OHLCV LIMIT 10;
-SELECT * FROM STOCK_DB.MARTS.FCT_STOCK_DAILY_RETURNS
-WHERE ticker = 'AAPL' ORDER BY date DESC LIMIT 10;
-```
+### 5. Docker (optional)
 
-## Data cleaning pipeline
-
-In one pass, the pipeline:
-
-1. **Parses** Polygon API responses into typed bar objects
-2. **Standardizes** to a fixed OHLCV schema (`bars_to_dataframe`)
-3. **Deduplicates** by `ticker + date` (keeps last row)
-4. **Validates** OHLC business rules (Pandera)
-5. **Writes** raw and processed CSV files
-6. **Loads** to Snowflake when `--snowflake` is used (MERGE upsert on ticker + date)
-
-Failed quality checks raise `DataQualityError` and block the processed CSV.
-
-## Data quality framework
-
-Every ingestion run validates:
-
-- **Schema**: required columns, types, non-null constraints
-- **Bounds**: prices and volume ≥ 0
-- **OHLC logic**: `high ≥ open/close/low`, `low ≤ open/close`
-- **Uniqueness**: one row per date per extract
-
-## Development
-
-### Run tests locally before changes
+Same CLI, reproducible environment:
 
 ```bash
-source .venv/bin/activate
-make lint
-make test
+make docker-build
+make docker-ingest-batch          # incremental batch → Snowflake
+make docker-ingest TICKER=AAPL START=2025-06-01 END=2025-06-05 SNOWFLAKE=1
 ```
 
-Or run directly:
+Secrets via `--env-file .env`; CSVs written to `./data` on the host.
 
-```bash
-python -m ruff check src tests
-python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing
-```
+---
 
-Quick test run:
+## CLI reference
 
-```bash
-python -m pytest tests/ -q
-```
+| Command | Description |
+|---------|-------------|
+| `stock-ingest ingest TICKER ...` | Single or multi-ticker ingest |
+| `stock-ingest ingest-batch FILE ...` | Tickers from file (see `config/tickers.example.txt`) |
+| `stock-ingest validate FILE` | Run Pandera checks on an existing CSV |
+| `--incremental` | Only dates after last load (Snowflake or CSV) |
+| `--snowflake` | MERGE upsert after validation |
+| `-v` / `--verbose` | Debug logging |
 
-Typical workflow: edit code → `make lint` → `make test` → commit → push.
+---
 
-Makefile shortcuts:
+## Data quality
 
-```bash
-make install
-make lint
-make test
-make ingest TICKER=AAPL START=2025-06-01 END=2025-06-05
-make validate FILE=data/processed/AAPL_2025-06-01_2025-06-05.csv
-make dbt-run
-make dbt-test
-```
+Every row passes:
+
+- **Schema** — required columns, types, non-nulls  
+- **Bounds** — prices and volume ≥ 0  
+- **OHLC logic** — `high ≥ open/close/low`, `low ≤ open/close`  
+- **Uniqueness** — one row per ticker + date  
+
+Failed checks block the processed CSV and Snowflake load.
+
+---
 
 ## CI/CD
 
-### CI (every push/PR)
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| [`ci.yml`](.github/workflows/ci.yml) | Push / PR | Ruff lint, pytest (3.11 + 3.12), quality dry-run |
+| [`scheduled-ingest.yml`](.github/workflows/scheduled-ingest.yml) | Cron (Mon 6 UTC) + manual | Incremental ingest → Snowflake → `dbt run` + `dbt test` |
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Scheduled runs need GitHub secrets: `POLYGON_API_KEY` and `SNOWFLAKE_*` ([checklist](docs/LEVEL2.md#31-github-secrets)). CI uses mocks — no live credentials.
 
-1. **Lint** — `ruff check`
-2. **Test** — unit + integration tests on Python 3.11 and 3.12
-3. **Pipeline dry-run** — validates a sample CSV through the quality framework and CLI
+---
 
-CI does **not** require real `POLYGON_API_KEY` or Snowflake credentials — tests use mocks.
+## Development
 
-### Scheduled ingest
+```bash
+make lint
+make test
+```
 
-[`.github/workflows/scheduled-ingest.yml`](.github/workflows/scheduled-ingest.yml) runs on a cron (6:00 UTC every Monday) and on manual dispatch:
+Typical loop: edit → lint → test → commit → push (CI runs automatically).
 
-1. Incremental batch ingest → Snowflake (`config/tickers.example.txt`)
-2. `dbt run` + `dbt test` to refresh `STAGING` and `MARTS`
-
-Requires GitHub repository secrets: `POLYGON_API_KEY` and all `SNOWFLAKE_*` variables (see [docs/LEVEL2.md](docs/LEVEL2.md#31-github-secrets)).
-
-## CSV / Snowflake schema
-
-| Column | Type | Description |
-|--------|------|-------------|
-| ticker | string | Symbol (e.g. AAPL) |
-| date | date | Trading date (UTC) |
-| open, high, low, close | float | OHLC prices |
-| volume | float | Share volume |
-| vwap | float | Volume-weighted average price |
-| transactions | int | Number of transactions |
-| source | string | Always `polygon.io` |
-| ingested_at | string | ISO timestamp of extraction |
+---
 
 ## Project layout
 
 ```
-src/stock_pipeline/
-├── cli.py                 # CLI entry point
-├── config.py              # .env settings (Polygon + Snowflake)
-├── pipeline.py            # Orchestrates extract → transform → quality → load
-├── extract/polygon.py     # Polygon API client
-├── transform/normalize.py # bars_to_dataframe()
-├── quality/__init__.py    # Pandera OHLCV validation
-└── load/
-    ├── csv_exporter.py    # CSV output
-    └── snowflake_loader.py # Snowflake append load
-
-tests/
-├── unit/                  # Module-level tests
-├── integration/           # End-to-end pipeline tests
-└── fixtures/              # Sample Polygon API JSON
-
-dbt/                       # dbt project (STAGING + MARTS on Snowflake)
-config/tickers.example.txt # Tickers used by scheduled ingest
-.github/workflows/
-├── ci.yml                 # Lint, test, quality dry-run
-└── scheduled-ingest.yml   # Cron + manual: incremental ingest + dbt
-docs/
-├── LEVEL1.md              # Snowflake load, batch, CI
-└── LEVEL2.md              # Incremental, dbt, cron, Docker
+src/stock_pipeline/     Python ELT (extract, quality, Snowflake MERGE, CLI)
+dbt/                      Staging + mart models, schema tests
+config/                   Ticker lists for batch / scheduled ingest
+.github/workflows/        CI + scheduled incremental pipeline
+docs/                     Level 1 & 2 guides, assets (screenshots)
+Dockerfile                Containerized CLI (Snowflake extras)
+tests/                    Unit + integration (~87% coverage)
 ```
 
-## Version control
+---
 
-- Source code and tests are tracked in git
-- `.env` and generated CSVs are gitignored
-- Directory structure is preserved via `.gitkeep`
+## Schema (raw / processed CSV & Snowflake)
 
-## Next steps (Level 2)
+| Column | Description |
+|--------|-------------|
+| `ticker` | Symbol (e.g. AAPL) |
+| `date` | Trading date |
+| `open`, `high`, `low`, `close` | OHLC prices |
+| `volume` | Share volume |
+| `vwap` | Volume-weighted average price |
+| `transactions` | Trade count |
+| `source` | `polygon.io` |
+| `ingested_at` | ISO timestamp of extraction |
 
-See [docs/LEVEL2.md](docs/LEVEL2.md):
+---
 
-- **Block 1–3:** Incremental loads, dbt models, scheduled GitHub Actions — done
-- **Block 4 (next):** Docker packaging — run the same CLI in a container
+## Portfolio one-liner
+
+> I built an incremental Python ELT pipeline from Polygon into Snowflake, validated OHLCV with Pandera, modeled staging and mart tables in dbt with tests, scheduled refreshes in GitHub Actions, and packaged the ingest CLI in Docker.
+
+---
+
+## License & notes
+
+- `.env`, `dbt/profiles.yml`, and generated CSVs are gitignored — never commit secrets.  
+- Polygon free tier limits history (~2 years); use recent dates on first runs.  
+- Repo folder name may differ from the display title above; the pipeline is the [`stock-pipeline`](pyproject.toml) Python package.

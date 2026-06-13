@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "stock-pipeline"
 version = "0.1.0"
-description = "Stock data ingestion pipeline using Polygon.io with data quality, testing, and CI/CD"
+description = "Production-style ELT pipeline: Polygon.io OHLCV → quality checks → Snowflake → dbt analytics"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
