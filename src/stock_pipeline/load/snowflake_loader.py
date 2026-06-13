@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import pandas as pd
 
 from stock_pipeline.config import Settings
+from stock_pipeline.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 try:
     import snowflake.connector
@@ -12,6 +15,8 @@ try:
 except ImportError:  # pragma: no cover - exercised via SnowflakeLoadError paths
     snowflake = None
     write_pandas = None
+
+STAGING_TABLE_SUFFIX = "_STAGING"
 
 
 class SnowflakeLoadError(Exception):
@@ -37,6 +42,26 @@ def _require_snowflake_package() -> None:
         )
 
 
+def _qualified_table(settings: Settings, table_name: str) -> str:
+    return f"{settings.snowflake_database}.{settings.snowflake_schema}.{table_name}"
+
+
+def _table_columns_ddl() -> str:
+    return """
+        TICKER VARCHAR NOT NULL,
+        DATE DATE NOT NULL,
+        OPEN FLOAT,
+        HIGH FLOAT,
+        LOW FLOAT,
+        CLOSE FLOAT,
+        VOLUME FLOAT,
+        VWAP FLOAT,
+        TRANSACTIONS NUMBER,
+        SOURCE VARCHAR,
+        INGESTED_AT VARCHAR
+    """
+
+
 def _connect(settings: Settings):
     _require_snowflake_package()
     connect_kwargs = {
@@ -53,27 +78,41 @@ def _connect(settings: Settings):
     return snowflake.connector.connect(**connect_kwargs)
 
 
-def ensure_table(conn, settings: Settings) -> None:
-    table = (
-        f"{settings.snowflake_database}.{settings.snowflake_schema}.{settings.snowflake_table}"
-    )
-    ddl = f"""
-    CREATE TABLE IF NOT EXISTS {table} (
-        TICKER VARCHAR NOT NULL,
-        DATE DATE NOT NULL,
-        OPEN FLOAT,
-        HIGH FLOAT,
-        LOW FLOAT,
-        CLOSE FLOAT,
-        VOLUME FLOAT,
-        VWAP FLOAT,
-        TRANSACTIONS NUMBER,
-        SOURCE VARCHAR,
-        INGESTED_AT VARCHAR
+def ensure_table(conn, settings: Settings, *, table_name: str | None = None) -> None:
+    table_name = table_name or settings.snowflake_table
+    qualified = _qualified_table(settings, table_name)
+    ddl = f"CREATE TABLE IF NOT EXISTS {qualified} ({_table_columns_ddl()})"
+    with conn.cursor() as cursor:
+        cursor.execute(ddl)
+
+
+def _merge_staging_into_target(conn, settings: Settings) -> None:
+    target = _qualified_table(settings, settings.snowflake_table)
+    staging = _qualified_table(settings, f"{settings.snowflake_table}{STAGING_TABLE_SUFFIX}")
+    merge_sql = f"""
+    MERGE INTO {target} AS target
+    USING {staging} AS source
+    ON target.TICKER = source.TICKER AND target.DATE = source.DATE
+    WHEN MATCHED THEN UPDATE SET
+        OPEN = source.OPEN,
+        HIGH = source.HIGH,
+        LOW = source.LOW,
+        CLOSE = source.CLOSE,
+        VOLUME = source.VOLUME,
+        VWAP = source.VWAP,
+        TRANSACTIONS = source.TRANSACTIONS,
+        SOURCE = source.SOURCE,
+        INGESTED_AT = source.INGESTED_AT
+    WHEN NOT MATCHED THEN INSERT (
+        TICKER, DATE, OPEN, HIGH, LOW, CLOSE, VOLUME, VWAP, TRANSACTIONS, SOURCE, INGESTED_AT
+    ) VALUES (
+        source.TICKER, source.DATE, source.OPEN, source.HIGH, source.LOW, source.CLOSE,
+        source.VOLUME, source.VWAP, source.TRANSACTIONS, source.SOURCE, source.INGESTED_AT
     )
     """
     with conn.cursor() as cursor:
-        cursor.execute(ddl)
+        cursor.execute(merge_sql)
+        cursor.execute(f"TRUNCATE TABLE {staging}")
 
 
 def load_dataframe_to_snowflake(
@@ -82,11 +121,12 @@ def load_dataframe_to_snowflake(
     *,
     conn=None,
 ) -> SnowflakeLoadResult:
-    """Append a validated OHLCV dataframe to Snowflake."""
+    """Upsert a validated OHLCV dataframe into Snowflake on (ticker, date)."""
     settings.require_snowflake_settings()
     _require_snowflake_package()
 
     if df.empty:
+        logger.info("Snowflake upsert skipped: dataframe is empty")
         return SnowflakeLoadResult(
             database=settings.snowflake_database,
             schema=settings.snowflake_schema,
@@ -96,9 +136,11 @@ def load_dataframe_to_snowflake(
 
     owns_connection = conn is None
     conn = conn or _connect(settings)
+    staging_table = f"{settings.snowflake_table}{STAGING_TABLE_SUFFIX}"
 
     try:
         ensure_table(conn, settings)
+        ensure_table(conn, settings, table_name=staging_table)
 
         working = df.copy()
         working["date"] = pd.to_datetime(working["date"]).dt.date
@@ -106,25 +148,33 @@ def load_dataframe_to_snowflake(
         success, _nchunks, nrows, _output = write_pandas(
             conn,
             working,
-            settings.snowflake_table,
+            staging_table,
             database=settings.snowflake_database,
             schema=settings.snowflake_schema,
             auto_create_table=False,
-            overwrite=False,
+            overwrite=True,
             quote_identifiers=False,
         )
+        if not success:
+            raise SnowflakeLoadError(
+                f"Failed to stage rows in {settings.snowflake_database}."
+                f"{settings.snowflake_schema}.{staging_table}"
+            )
+
+        _merge_staging_into_target(conn, settings)
+    except SnowflakeLoadError:
+        raise
     except Exception as exc:
         raise SnowflakeLoadError(str(exc)) from exc
     finally:
         if owns_connection:
             conn.close()
 
-    if not success:
-        raise SnowflakeLoadError(
-            f"Failed to load rows into {settings.snowflake_database}."
-            f"{settings.snowflake_schema}.{settings.snowflake_table}"
-        )
-
+    logger.info(
+        "Upserted %s rows into %s",
+        nrows,
+        _qualified_table(settings, settings.snowflake_table),
+    )
     return SnowflakeLoadResult(
         database=settings.snowflake_database,
         schema=settings.snowflake_schema,

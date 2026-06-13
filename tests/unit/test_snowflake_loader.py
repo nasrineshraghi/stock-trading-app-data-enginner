@@ -12,6 +12,7 @@ from stock_pipeline.load.snowflake_loader import (
 @pytest.fixture
 def snowflake_settings(tmp_path) -> Settings:
     return Settings(
+        _env_file=None,
         polygon_api_key="test-key",
         data_dir=tmp_path / "data",
         snowflake_account="xy12345.us-east-1",
@@ -24,13 +25,21 @@ def snowflake_settings(tmp_path) -> Settings:
     )
 
 
+def _mock_connection():
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_conn.cursor.return_value.__exit__.return_value = None
+    return mock_conn, mock_cursor
+
+
 @patch("stock_pipeline.load.snowflake_loader.write_pandas")
 @patch("stock_pipeline.load.snowflake_loader._connect")
 @patch("stock_pipeline.load.snowflake_loader.snowflake")
 def test_load_dataframe_to_snowflake(
     _mock_snowflake_module, mock_connect, mock_write_pandas, sample_ohlcv_df, snowflake_settings
 ):
-    mock_conn = MagicMock()
+    mock_conn, mock_cursor = _mock_connection()
     mock_connect.return_value = mock_conn
     mock_write_pandas.return_value = (True, 1, 2, [])
 
@@ -38,23 +47,22 @@ def test_load_dataframe_to_snowflake(
 
     assert result.rows_loaded == 2
     assert result.qualified_table == "STOCK_DB.RAW.STOCK_OHLCV"
-    mock_connect.assert_called_once()
     mock_write_pandas.assert_called_once()
+    assert mock_write_pandas.call_args.args[2] == "STOCK_OHLCV_STAGING"
+    assert mock_cursor.execute.call_count == 4
     mock_conn.close.assert_called_once()
 
 
 def test_load_dataframe_to_snowflake_requires_config(sample_ohlcv_df, test_settings):
     with pytest.raises(RuntimeError, match="Snowflake is not fully configured"):
         load_dataframe_to_snowflake(sample_ohlcv_df, test_settings)
-
-
 @patch("stock_pipeline.load.snowflake_loader.write_pandas")
 @patch("stock_pipeline.load.snowflake_loader._connect")
 @patch("stock_pipeline.load.snowflake_loader.snowflake")
 def test_load_dataframe_to_snowflake_wraps_write_errors(
     _mock_snowflake_module, mock_connect, mock_write_pandas, sample_ohlcv_df, snowflake_settings
 ):
-    mock_conn = MagicMock()
+    mock_conn, _mock_cursor = _mock_connection()
     mock_connect.return_value = mock_conn
     mock_write_pandas.side_effect = Exception("network down")
 

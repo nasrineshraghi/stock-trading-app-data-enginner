@@ -40,6 +40,7 @@ def sample_ohlcv_df() -> pd.DataFrame:
 @pytest.fixture
 def test_settings(tmp_path: Path) -> Settings:
     return Settings(
+        _env_file=None,
         polygon_api_key="test-key",
         polygon_base_url="https://api.polygon.io",
         data_dir=tmp_path / "data",

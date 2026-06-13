@@ -77,3 +77,28 @@ jobs:
 
       - name: CLI validate command
         run: stock-ingest validate data/processed/CI_SAMPLE.csv
+
+      - name: Quality gate rejects invalid OHLC data
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from stock_pipeline.quality import validate_ohlcv
+
+          bad = pd.DataFrame({
+              "ticker": ["AAPL"],
+              "date": pd.to_datetime(["2024-01-02"]),
+              "open": [150.0],
+              "high": [140.0],
+              "low": [149.0],
+              "close": [151.0],
+              "volume": [1_000_000.0],
+              "vwap": [150.0],
+              "transactions": [1000],
+              "source": ["polygon.io"],
+              "ingested_at": ["2024-06-01T00:00:00+00:00"],
+          })
+          report = validate_ohlcv(bad)
+          if report.passed:
+              raise SystemExit("Expected invalid OHLC data to fail quality checks")
+          print("Quality gate correctly rejected bad data")
+          PY

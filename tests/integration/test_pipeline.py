@@ -4,7 +4,7 @@ from unittest.mock import patch
 import httpx
 
 from stock_pipeline.extract.polygon import PolygonClient
-from stock_pipeline.pipeline import run_ingestion_pipeline
+from stock_pipeline.pipeline import run_batch_ingestion_pipeline, run_ingestion_pipeline
 
 
 def test_run_ingestion_pipeline_end_to_end(httpx_mock, polygon_response, test_settings):
@@ -60,3 +60,35 @@ def test_run_ingestion_pipeline_loads_to_snowflake(
     mock_load_snowflake.assert_called_once()
 
     client.close()
+
+
+def test_run_batch_ingestion_pipeline_partial_failure(httpx_mock, polygon_response, test_settings):
+    httpx_mock.add_response(json=polygon_response)
+    httpx_mock.add_response(status_code=404, json={"status": "ERROR", "error": "Not found"})
+
+    batch = run_batch_ingestion_pipeline(
+        ["AAPL", "BAD"],
+        date(2024, 1, 1),
+        date(2024, 1, 31),
+        settings=test_settings,
+    )
+
+    assert len(batch.results) == 1
+    assert batch.results[0].ticker == "AAPL"
+    assert len(batch.failures) == 1
+    assert batch.failures[0][0] == "BAD"
+
+
+def test_run_batch_ingestion_pipeline_all_success(httpx_mock, polygon_response, test_settings):
+    httpx_mock.add_response(json=polygon_response)
+    httpx_mock.add_response(json=polygon_response)
+
+    batch = run_batch_ingestion_pipeline(
+        ["AAPL", "MSFT"],
+        date(2024, 1, 1),
+        date(2024, 1, 31),
+        settings=test_settings,
+    )
+
+    assert len(batch.results) == 2
+    assert batch.failures == []

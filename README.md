@@ -4,6 +4,8 @@
 
 Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate data quality, save to CSV, and optionally load into Snowflake — with tests and CI/CD baked in.
 
+**Practice guide:** see [docs/LEVEL1.md](docs/LEVEL1.md) for step-by-step production-ready exercises (logging, batch ingest, Snowflake upsert, CI quality gates).
+
 ## Architecture
 
 ```
@@ -16,7 +18,7 @@ Polygon.io API  →  Extract  →  Transform  →  Quality Checks  →  CSV (raw
 | Transform | `stock_pipeline.transform.normalize` | Normalize to canonical OHLCV schema |
 | Quality | `stock_pipeline.quality` | Pandera schema + OHLC business rules |
 | Load | `stock_pipeline.load.csv_exporter` | Write versioned CSV files |
-| Load | `stock_pipeline.load.snowflake_loader` | Append validated rows to Snowflake |
+| Load | `stock_pipeline.load.snowflake_loader` | Upsert validated rows to Snowflake |
 | Orchestration | `stock_pipeline.pipeline` | End-to-end ingestion workflow |
 | CLI | `stock_pipeline.cli` | `stock-ingest ingest` and `stock-ingest validate` |
 

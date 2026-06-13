@@ -12,6 +12,9 @@ test:
 ingest:
 	stock-ingest ingest $(TICKER) --start $(START) --end $(END)
 
+ingest-batch:
+	stock-ingest ingest-batch config/tickers.txt --start $(START) --end $(END)
+
 validate:
 	stock-ingest validate $(FILE)
 
