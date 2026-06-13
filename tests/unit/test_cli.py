@@ -1,4 +1,3 @@
-from datetime import date
 from pathlib import Path
 
 from typer.testing import CliRunner
