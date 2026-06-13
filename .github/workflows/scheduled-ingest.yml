@@ -1,0 +1,48 @@
+name: Scheduled ingest
+
+on:
+  schedule:
+    # 6:00 UTC, Mon–Fri (adjust for your timezone)
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}   # lets you run manually from Actions tab
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      DISABLE_PANDERA_IMPORT_WARNING: "true"
+      NO_COLOR: "1"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pipeline
+        run: pip install -e ".[snowflake]"
+
+      - name: Incremental ingest to Snowflake
+        run: |
+          stock-ingest ingest-batch config/tickers.example.txt \
+            --incremental --snowflake -v
+
+      - name: Install dbt
+        run: pip install -e ".[dbt]"
+
+      - name: Prepare dbt profile
+        run: cp dbt/profiles.yml.example dbt/profiles.yml
+
+      - name: Refresh analytics models
+        run: |
+          cd dbt && dbt run --profiles-dir . && dbt test --profiles-dir .
