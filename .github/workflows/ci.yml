@@ -12,6 +12,7 @@ jobs:
     env:
       POLYGON_API_KEY: test-key-for-ci
       DISABLE_PANDERA_IMPORT_WARNING: "true"
+      NO_COLOR: "1"
       SNOWFLAKE_ACCOUNT: ""
       SNOWFLAKE_USER: ""
       SNOWFLAKE_PASSWORD: ""
@@ -41,9 +42,7 @@ jobs:
         run: python -m ruff check src tests
 
       - name: Unit & integration tests
-        run: |
-          python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing --tb=short -q \
-            || { python -m pytest tests/ --tb=long --maxfail=3 -q 2>&1 | tail -60; exit 1; }
+        run: python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing
 
   pipeline-dry-run:
     runs-on: ubuntu-latest

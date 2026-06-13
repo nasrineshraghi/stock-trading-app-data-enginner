@@ -70,6 +70,7 @@ def _isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DISABLE_PANDERA_IMPORT_WARNING", "true")
+    monkeypatch.setenv("NO_COLOR", "1")
 
 
 @pytest.fixture
