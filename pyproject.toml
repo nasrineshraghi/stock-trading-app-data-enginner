@@ -25,6 +25,9 @@ dev = [
     "pytest-httpx>=0.30.0",
     "ruff>=0.4.0",
 ]
+snowflake = [
+    "snowflake-connector-python[pandas]>=3.12.0",
+]
 
 [project.scripts]
 stock-ingest = "stock_pipeline.cli:app"

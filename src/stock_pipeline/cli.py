@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from stock_pipeline.extract.polygon import PolygonExtractError
+from stock_pipeline.load.snowflake_loader import SnowflakeLoadError
 from stock_pipeline.pipeline import load_csv, run_ingestion_pipeline
 from stock_pipeline.quality import validate_ohlcv
 
@@ -20,6 +21,11 @@ def ingest(
     ticker: str = typer.Argument(..., help="Stock ticker symbol, e.g. AAPL"),
     start: str = typer.Option(..., "--start", help="Start date YYYY-MM-DD"),
     end: str = typer.Option(..., "--end", help="End date YYYY-MM-DD"),
+    snowflake: bool = typer.Option(
+        False,
+        "--snowflake",
+        help="Load validated rows into Snowflake after CSV export",
+    ),
 ) -> None:
     """Extract, validate, and export OHLCV bars to CSV."""
     try:
@@ -31,8 +37,16 @@ def ingest(
         raise typer.BadParameter("--start must be on or before --end")
 
     try:
-        result = run_ingestion_pipeline(ticker, start_date, end_date)
+        result = run_ingestion_pipeline(
+            ticker,
+            start_date,
+            end_date,
+            load_to_snowflake=snowflake,
+        )
     except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    except SnowflakeLoadError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     except PolygonExtractError as exc:
@@ -51,6 +65,11 @@ def ingest(
     typer.echo(f"Raw CSV:        {result.raw_path}")
     typer.echo(f"Processed CSV:  {result.processed_path}")
     typer.echo(f"Quality checks: {', '.join(result.quality_checks)}")
+    if result.snowflake is not None:
+        typer.echo(
+            f"Snowflake table: {result.snowflake.qualified_table} "
+            f"({result.snowflake.rows_loaded} rows loaded)"
+        )
 
 
 @app.command("validate")

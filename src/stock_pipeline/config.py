@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     polygon_base_url: str = "https://api.polygon.io"
     data_dir: Path = Path("./data")
 
+    snowflake_account: str | None = None
+    snowflake_user: str | None = None
+    snowflake_password: str | None = None
+    snowflake_warehouse: str | None = None
+    snowflake_database: str | None = None
+    snowflake_schema: str | None = None
+    snowflake_table: str = "STOCK_OHLCV"
+    snowflake_role: str | None = None
+
     @field_validator("data_dir", mode="before")
     @classmethod
     def resolve_data_dir(cls, value: str | Path) -> Path:
@@ -27,6 +36,36 @@ class Settings(BaseSettings):
     @property
     def processed_dir(self) -> Path:
         return self.data_dir / "processed"
+
+    @property
+    def snowflake_configured(self) -> bool:
+        required = (
+            self.snowflake_account,
+            self.snowflake_user,
+            self.snowflake_password,
+            self.snowflake_warehouse,
+            self.snowflake_database,
+            self.snowflake_schema,
+        )
+        return all(value not in (None, "") for value in required)
+
+    def require_snowflake_settings(self) -> None:
+        missing = []
+        for name in (
+            "snowflake_account",
+            "snowflake_user",
+            "snowflake_password",
+            "snowflake_warehouse",
+            "snowflake_database",
+            "snowflake_schema",
+        ):
+            if not getattr(self, name):
+                missing.append(name.upper())
+        if missing:
+            raise RuntimeError(
+                "Snowflake is not fully configured. Set these in .env: "
+                + ", ".join(missing)
+            )
 
 
 def get_settings() -> Settings:

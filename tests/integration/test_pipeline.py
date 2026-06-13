@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 import httpx
 
@@ -23,5 +24,39 @@ def test_run_ingestion_pipeline_end_to_end(httpx_mock, polygon_response, test_se
     assert result.raw_path.exists()
     assert result.processed_path.exists()
     assert "schema:" in result.quality_checks[0]
+
+    client.close()
+
+
+@patch("stock_pipeline.pipeline.load_dataframe_to_snowflake")
+def test_run_ingestion_pipeline_loads_to_snowflake(
+    mock_load_snowflake,
+    httpx_mock,
+    polygon_response,
+    test_settings,
+):
+    from stock_pipeline.load.snowflake_loader import SnowflakeLoadResult
+
+    httpx_mock.add_response(json=polygon_response)
+    mock_load_snowflake.return_value = SnowflakeLoadResult(
+        database="STOCK_DB",
+        schema="RAW",
+        table="STOCK_OHLCV",
+        rows_loaded=2,
+    )
+
+    client = PolygonClient(api_key="test-key", client=httpx.Client())
+    result = run_ingestion_pipeline(
+        "AAPL",
+        date(2024, 1, 1),
+        date(2024, 1, 31),
+        settings=test_settings,
+        client=client,
+        load_to_snowflake=True,
+    )
+
+    assert result.snowflake is not None
+    assert result.snowflake.rows_loaded == 2
+    mock_load_snowflake.assert_called_once()
 
     client.close()

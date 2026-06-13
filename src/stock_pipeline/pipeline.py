@@ -9,6 +9,7 @@ import pandas as pd
 from stock_pipeline.config import Settings, get_settings
 from stock_pipeline.extract.polygon import PolygonClient
 from stock_pipeline.load.csv_exporter import build_output_path, export_dataframe
+from stock_pipeline.load.snowflake_loader import SnowflakeLoadResult, load_dataframe_to_snowflake
 from stock_pipeline.quality import assert_ohlcv_quality
 from stock_pipeline.transform.normalize import bars_to_dataframe
 
@@ -22,6 +23,7 @@ class PipelineResult:
     raw_path: Path
     processed_path: Path
     quality_checks: list[str]
+    snowflake: SnowflakeLoadResult | None = None
 
 
 def run_ingestion_pipeline(
@@ -31,6 +33,7 @@ def run_ingestion_pipeline(
     *,
     settings: Settings | None = None,
     client: PolygonClient | None = None,
+    load_to_snowflake: bool = False,
 ) -> PipelineResult:
     settings = settings or get_settings()
     owns_client = client is None
@@ -63,6 +66,10 @@ def run_ingestion_pipeline(
         )
         export_dataframe(df, processed_path)
 
+        snowflake_result = None
+        if load_to_snowflake:
+            snowflake_result = load_dataframe_to_snowflake(df, settings)
+
         return PipelineResult(
             ticker=ticker.upper(),
             start_date=start_date,
@@ -71,6 +78,7 @@ def run_ingestion_pipeline(
             raw_path=raw_path,
             processed_path=processed_path,
             quality_checks=report.checks_run,
+            snowflake=snowflake_result,
         )
     finally:
         if owns_client:
