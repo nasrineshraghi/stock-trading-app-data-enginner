@@ -41,7 +41,9 @@ jobs:
         run: python -m ruff check src tests
 
       - name: Unit & integration tests
-        run: python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing
+        run: |
+          python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing --tb=short -q \
+            || { python -m pytest tests/ --tb=long --maxfail=3 -q 2>&1 | tail -60; exit 1; }
 
   pipeline-dry-run:
     runs-on: ubuntu-latest

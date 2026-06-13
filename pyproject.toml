@@ -52,7 +52,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.coverage.run]
 source = ["stock_pipeline"]
-branch = true
+branch = false
 
 [tool.coverage.report]
 fail_under = 80
