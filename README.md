@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml/badge.svg)](https://github.com/nasrineshraghi/stock-trading-app-data-enginner/actions/workflows/ci.yml)
 
-Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate data quality, save to CSV, and optionally load into Snowflake — with tests and CI/CD baked in.
+Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate data quality, save to CSV, load into Snowflake, transform with dbt, and refresh on a schedule — with tests and CI/CD baked in.
 
 **Practice guide:** see [docs/LEVEL1.md](docs/LEVEL1.md) for step-by-step production-ready exercises (logging, batch ingest, Snowflake upsert, CI quality gates).
 
@@ -11,7 +11,11 @@ Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate d
 ## Architecture
 
 ```
-Polygon.io API  →  Extract  →  Transform  →  Quality Checks  →  CSV (raw + processed)  →  Snowflake (optional)
+Polygon.io  →  Python ELT (extract → validate → CSV)  →  Snowflake RAW_DATA_STOCK.STOCK_OHLCV
+                                                                    ↓
+                                                          dbt: STAGING → MARTS
+                                                                    ↑
+                                              GitHub Actions cron (incremental ingest + dbt)
 ```
 
 | Layer | Module | Responsibility |
@@ -20,9 +24,12 @@ Polygon.io API  →  Extract  →  Transform  →  Quality Checks  →  CSV (raw
 | Transform | `stock_pipeline.transform.normalize` | Normalize to canonical OHLCV schema |
 | Quality | `stock_pipeline.quality` | Pandera schema + OHLC business rules |
 | Load | `stock_pipeline.load.csv_exporter` | Write versioned CSV files |
-| Load | `stock_pipeline.load.snowflake_loader` | Upsert validated rows to Snowflake |
+| Load | `stock_pipeline.load.snowflake_loader` | MERGE upsert on `(ticker, date)` |
+| Incremental | `stock_pipeline.incremental` | Load only dates after last successful ingest |
 | Orchestration | `stock_pipeline.pipeline` | End-to-end ingestion workflow |
-| CLI | `stock_pipeline.cli` | `stock-ingest ingest` and `stock-ingest validate` |
+| CLI | `stock_pipeline.cli` | `ingest`, `ingest-batch`, `validate` |
+| Analytics | `dbt/` | Staging view + daily returns mart + schema tests |
+| Automation | `.github/workflows/scheduled-ingest.yml` | Cron + manual: incremental ingest + dbt |
 
 ## API reference
 
@@ -136,6 +143,13 @@ Run ingest with the Snowflake flag:
 stock-ingest ingest AAPL --start 2025-06-01 --end 2025-06-05 --snowflake
 ```
 
+Incremental load (only new dates since last run in Snowflake or CSV):
+
+```bash
+stock-ingest ingest AAPL --incremental --snowflake
+stock-ingest ingest-batch config/tickers.example.txt --incremental --snowflake
+```
+
 Verify in Snowflake:
 
 ```sql
@@ -143,6 +157,25 @@ SELECT * FROM STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV ORDER BY DATE;
 ```
 
 The table `STOCK_OHLCV` is created automatically on first load if it does not exist.
+
+### 6. dbt analytics (optional)
+
+Transform raw Snowflake data into staging and mart models. See [docs/LEVEL2.md](docs/LEVEL2.md) for full setup.
+
+```bash
+pip install -e ".[dbt,snowflake]"
+cp dbt/profiles.yml.example dbt/profiles.yml   # or rely on env vars + --profiles-dir .
+export $(grep -v '^#' .env | xargs)
+
+make dbt-run    # STAGING.STG_STOCK_OHLCV (view)
+make dbt-test   # MARTS.FCT_STOCK_DAILY_RETURNS (table + tests)
+```
+
+```sql
+SELECT * FROM STOCK_DB.STAGING.STG_STOCK_OHLCV LIMIT 10;
+SELECT * FROM STOCK_DB.MARTS.FCT_STOCK_DAILY_RETURNS
+WHERE ticker = 'AAPL' ORDER BY date DESC LIMIT 10;
+```
 
 ## Data cleaning pipeline
 
@@ -153,7 +186,7 @@ In one pass, the pipeline:
 3. **Deduplicates** by `ticker + date` (keeps last row)
 4. **Validates** OHLC business rules (Pandera)
 5. **Writes** raw and processed CSV files
-6. **Loads** to Snowflake when `--snowflake` is used (append)
+6. **Loads** to Snowflake when `--snowflake` is used (MERGE upsert on ticker + date)
 
 Failed quality checks raise `DataQualityError` and block the processed CSV.
 
@@ -199,19 +232,30 @@ make lint
 make test
 make ingest TICKER=AAPL START=2025-06-01 END=2025-06-05
 make validate FILE=data/processed/AAPL_2025-06-01_2025-06-05.csv
+make dbt-run
+make dbt-test
 ```
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR:
+### CI (every push/PR)
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 1. **Lint** — `ruff check`
 2. **Test** — unit + integration tests on Python 3.11 and 3.12
 3. **Pipeline dry-run** — validates a sample CSV through the quality framework and CLI
 
-Uses `actions/checkout@v6` and `actions/setup-python@v6` (Node.js 24 compatible).
+CI does **not** require real `POLYGON_API_KEY` or Snowflake credentials — tests use mocks.
 
-CI does **not** require `POLYGON_API_KEY` or Snowflake credentials — tests use mocks.
+### Scheduled ingest
+
+[`.github/workflows/scheduled-ingest.yml`](.github/workflows/scheduled-ingest.yml) runs on a cron (6:00 UTC every Monday) and on manual dispatch:
+
+1. Incremental batch ingest → Snowflake (`config/tickers.example.txt`)
+2. `dbt run` + `dbt test` to refresh `STAGING` and `MARTS`
+
+Requires GitHub repository secrets: `POLYGON_API_KEY` and all `SNOWFLAKE_*` variables (see [docs/LEVEL2.md](docs/LEVEL2.md#31-github-secrets)).
 
 ## CSV / Snowflake schema
 
@@ -245,8 +289,14 @@ tests/
 ├── integration/           # End-to-end pipeline tests
 └── fixtures/              # Sample Polygon API JSON
 
-dbt/                       # dbt project (staging + marts on Snowflake)
-docs/LEVEL2.md             # Level 2 practice guide
+dbt/                       # dbt project (STAGING + MARTS on Snowflake)
+config/tickers.example.txt # Tickers used by scheduled ingest
+.github/workflows/
+├── ci.yml                 # Lint, test, quality dry-run
+└── scheduled-ingest.yml   # Cron + manual: incremental ingest + dbt
+docs/
+├── LEVEL1.md              # Snowflake load, batch, CI
+└── LEVEL2.md              # Incremental, dbt, cron, Docker
 ```
 
 ## Version control
@@ -259,6 +309,5 @@ docs/LEVEL2.md             # Level 2 practice guide
 
 See [docs/LEVEL2.md](docs/LEVEL2.md):
 
-- **Block 2 (current):** dbt staging + mart models on `STOCK_OHLCV`
-- **Block 3:** Scheduled GitHub Actions cron ingest
-- **Block 4:** Docker packaging
+- **Block 1–3:** Incremental loads, dbt models, scheduled GitHub Actions — done
+- **Block 4 (next):** Docker packaging — run the same CLI in a container

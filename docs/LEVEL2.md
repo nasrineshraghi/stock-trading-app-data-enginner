@@ -5,9 +5,9 @@ Level 1 got data **into** Snowflake. Level 2 makes the pipeline **production-sha
 | Block | Topic | Status |
 |-------|--------|--------|
 | 1 | Incremental loads (`--incremental`) | Done |
-| 2 | dbt models on `STOCK_OHLCV` | **You are here** |
-| 3 | Scheduled GitHub Actions (cron) | Next |
-| 4 | Docker packaging | After cron |
+| 2 | dbt models on `STOCK_OHLCV` | Done |
+| 3 | Scheduled GitHub Actions (cron) | Done |
+| 4 | Docker packaging | **Next** |
 
 ---
 
@@ -54,6 +54,8 @@ pip install -e ".[dbt,snowflake]"
 dbt/
 ├── dbt_project.yml
 ├── profiles.yml.example
+├── macros/
+│   └── generate_schema_name.sql   # STAGING / MARTS (not STAGING_STAGING)
 ├── models/
 │   ├── sources.yml
 │   ├── staging/
@@ -64,7 +66,7 @@ dbt/
 │       └── schema.yml
 ```
 
-dbt writes to schemas **`STAGING`** and **`MARTS`** in the same database as raw data.
+dbt writes to schemas **`STAGING`** and **`MARTS`** in the same database as raw data. The custom `generate_schema_name` macro avoids dbt’s default `{profile_schema}_{model_schema}` prefix (which created `STAGING_STAGING` before the fix).
 
 ### 2.3 Run dbt
 
@@ -106,21 +108,66 @@ If raw has rows but `STAGING.STG_STOCK_OHLCV` is empty or missing, check you are
 
 ---
 
-## Block 3 preview — Scheduled ingest (cron)
+## Block 3 — Scheduled ingest (GitHub Actions)
 
-Add `.github/workflows/scheduled-ingest.yml` to run nightly:
+### Goal
 
-```yaml
-on:
-  schedule:
-    - cron: "0 6 * * 1-5"   # 6 UTC, Mon–Fri
+Run incremental Polygon → Snowflake ingest on a schedule, then refresh dbt models — no manual laptop runs.
+
+```
+GitHub Actions (cron)  →  ingest-batch --incremental --snowflake  →  dbt run && dbt test
 ```
 
-Use GitHub secrets for `POLYGON_API_KEY` and `SNOWFLAKE_*`, run:
+Workflow file: [`.github/workflows/scheduled-ingest.yml`](../.github/workflows/scheduled-ingest.yml)
 
-```bash
-stock-ingest ingest-batch config/tickers.example.txt --incremental --snowflake
+### 3.1 GitHub secrets
+
+In **Settings → Secrets and variables → Actions**, add:
+
+| Secret | Required |
+|--------|----------|
+| `POLYGON_API_KEY` | Yes |
+| `SNOWFLAKE_ACCOUNT` | Yes |
+| `SNOWFLAKE_USER` | Yes |
+| `SNOWFLAKE_PASSWORD` | Yes |
+| `SNOWFLAKE_WAREHOUSE` | Yes |
+| `SNOWFLAKE_DATABASE` | Yes |
+| `SNOWFLAKE_SCHEMA` | Yes |
+| `SNOWFLAKE_ROLE` | Optional |
+
+Use the same values as your local `.env`. Never commit `.env` or `dbt/profiles.yml`.
+
+### 3.2 What the workflow runs
+
+1. `stock-ingest ingest-batch config/tickers.example.txt --incremental --snowflake -v`
+2. Copy `dbt/profiles.yml.example` → `dbt/profiles.yml` (env vars supply credentials)
+3. `dbt run` and `dbt test` in `dbt/`
+
+**Schedule:** `0 6 * * 1` — 6:00 UTC every Monday. Edit the cron in the workflow for other days (e.g. `1-5` for weekdays).
+
+**Manual run:** Actions → **Scheduled ingest** → **Run workflow** (`workflow_dispatch`).
+
+### 3.3 Verify after a run
+
+Check the Actions log for `Batch summary: N succeeded, 0 failed` and dbt `Completed successfully`.
+
+In Snowflake:
+
+```sql
+SELECT ticker, MAX(date) AS latest
+FROM STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV
+GROUP BY ticker;
+
+SELECT COUNT(*) FROM STOCK_DB.STAGING.STG_STOCK_OHLCV;
+SELECT COUNT(*) FROM STOCK_DB.MARTS.FCT_STOCK_DAILY_RETURNS;
 ```
+
+### 3.4 Acceptance criteria
+
+- [ ] All required GitHub secrets are set
+- [ ] Manual **Run workflow** succeeds
+- [ ] Raw, staging, and mart row counts look correct
+- [ ] Cron schedule matches when you want fresh data
 
 ---
 
