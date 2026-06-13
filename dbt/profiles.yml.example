@@ -1,0 +1,16 @@
+# Copy to ~/.dbt/profiles.yml OR keep here and use: dbt run --profiles-dir .
+# Values can match your .env (same Snowflake account as the Python pipeline).
+
+stock_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', '') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'STOCK_DB') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      schema: "{{ env_var('SNOWFLAKE_DBT_SCHEMA', 'STAGING') }}"
+      threads: 4

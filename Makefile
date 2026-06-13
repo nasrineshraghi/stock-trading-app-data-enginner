@@ -1,4 +1,4 @@
-.PHONY: install lint test ingest validate clean
+.PHONY: install lint test ingest validate clean dbt-run dbt-test dbt-parse
 
 install:
 	python -m pip install -e ".[dev]"
@@ -22,3 +22,14 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .coverage htmlcov/
+
+DBT_DIR=dbt
+
+dbt-run:
+	cd $(DBT_DIR) && dbt run --profiles-dir .
+
+dbt-test:
+	cd $(DBT_DIR) && dbt test --profiles-dir .
+
+dbt-parse:
+	cd $(DBT_DIR) && dbt parse --profiles-dir .

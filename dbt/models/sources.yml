@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: raw_stock
+    description: OHLCV bars loaded by stock-ingest (--snowflake MERGE)
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'STOCK_DB') }}"
+    schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'RAW_DATA_STOCK') }}"
+    tables:
+      - name: stock_ohlcv
+        identifier: STOCK_OHLCV
+        description: Raw daily OHLCV from Polygon.io
+        columns:
+          - name: TICKER
+            description: Stock symbol
+          - name: DATE
+            description: Trading date

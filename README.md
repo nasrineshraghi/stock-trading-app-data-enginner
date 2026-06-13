@@ -6,6 +6,8 @@ Extract daily OHLCV stock bars from [Polygon.io](https://polygon.io), validate d
 
 **Practice guide:** see [docs/LEVEL1.md](docs/LEVEL1.md) for step-by-step production-ready exercises (logging, batch ingest, Snowflake upsert, CI quality gates).
 
+**Level 2 (dbt, cron, Docker):** see [docs/LEVEL2.md](docs/LEVEL2.md).
+
 ## Architecture
 
 ```
@@ -242,6 +244,9 @@ tests/
 ├── unit/                  # Module-level tests
 ├── integration/           # End-to-end pipeline tests
 └── fixtures/              # Sample Polygon API JSON
+
+dbt/                       # dbt project (staging + marts on Snowflake)
+docs/LEVEL2.md             # Level 2 practice guide
 ```
 
 ## Version control
@@ -250,9 +255,10 @@ tests/
 - `.env` and generated CSVs are gitignored
 - Directory structure is preserved via `.gitkeep`
 
-## Next steps
+## Next steps (Level 2)
 
-- Add batch ingestion for multiple tickers
-- Schedule daily ingestion (cron / Airflow / GitHub Actions scheduled workflow)
-- Upsert into Snowflake to avoid duplicate dates on re-runs
-- Add Great Expectations dashboards for quality reporting
+See [docs/LEVEL2.md](docs/LEVEL2.md):
+
+- **Block 2 (current):** dbt staging + mart models on `STOCK_OHLCV`
+- **Block 3:** Scheduled GitHub Actions cron ingest
+- **Block 4:** Docker packaging
