@@ -4,10 +4,10 @@ install:
 	python -m pip install -e ".[dev]"
 
 lint:
-	ruff check src tests
+	python -m ruff check src tests
 
 test:
-	pytest tests/ --cov=stock_pipeline --cov-report=term-missing
+	python -m pytest tests/ --cov=stock_pipeline --cov-report=term-missing
 
 ingest:
 	stock-ingest ingest $(TICKER) --start $(START) --end $(END)
