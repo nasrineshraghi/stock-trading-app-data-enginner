@@ -44,7 +44,32 @@ def test_settings(tmp_path: Path) -> Settings:
         polygon_api_key="test-key",
         polygon_base_url="https://api.polygon.io",
         data_dir=tmp_path / "data",
+        snowflake_account=None,
+        snowflake_user=None,
+        snowflake_password=None,
+        snowflake_warehouse=None,
+        snowflake_database=None,
+        snowflake_schema=None,
+        snowflake_role=None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests independent of developer shell and CI repository secrets."""
+    monkeypatch.setenv("POLYGON_API_KEY", "test-key")
+    monkeypatch.delenv("DATA_DIR", raising=False)
+    for name in (
+        "SNOWFLAKE_ACCOUNT",
+        "SNOWFLAKE_USER",
+        "SNOWFLAKE_PASSWORD",
+        "SNOWFLAKE_WAREHOUSE",
+        "SNOWFLAKE_DATABASE",
+        "SNOWFLAKE_SCHEMA",
+        "SNOWFLAKE_ROLE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DISABLE_PANDERA_IMPORT_WARNING", "true")
 
 
 @pytest.fixture

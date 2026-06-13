@@ -29,8 +29,10 @@ def snowflake_settings(tmp_path) -> Settings:
 def _mock_connection():
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_conn.cursor.return_value.__exit__.return_value = None
+    mock_cm = MagicMock()
+    mock_cm.__enter__ = MagicMock(return_value=mock_cursor)
+    mock_cm.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value = mock_cm
     return mock_conn, mock_cursor
 
 
