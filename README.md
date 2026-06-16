@@ -130,11 +130,7 @@ pip install -e ".[dashboard,snowflake]"
 make dashboard
 ```
 
-Opens at `http://localhost:8501` — reads from Snowflake mart or processed CSVs.
-
-![Streamlit dashboard preview](docs/assets/streamlit-dashboard.png)
-
-See [docs/DASHBOARD.md](docs/DASHBOARD.md) for setup and troubleshooting.
+Opens at `http://localhost:8501` — reads from Snowflake mart or processed CSVs. See [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
 ### 6. Docker (optional)
 
