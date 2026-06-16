@@ -71,15 +71,19 @@ flowchart LR
 | `STAGING` | `STG_STOCK_OHLCV` | dbt view — cleaned column names, typed fields |
 | `MARTS` | `FCT_STOCK_DAILY_RETURNS` | dbt table — daily % return vs previous close |
 
-### Snowflake preview
+### Screenshots
 
-Raw layer after ingest (`STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV`):
+**Snowflake raw layer** (`STOCK_DB.RAW_DATA_STOCK.STOCK_OHLCV`):
 
 ![Snowflake raw OHLCV table with MSFT daily bars](docs/assets/snowflake-raw-ohlcv.png)
 
-*Polygon-sourced bars with quality metadata (`source`, `ingested_at`). Analytics models live in `STAGING` and `MARTS` — see [Level 2](docs/LEVEL2.md).*
+*Polygon-sourced bars with quality metadata (`source`, `ingested_at`).*
 
-Add more screenshots under `docs/assets/` (e.g. mart query results, dbt test output) and link them here.
+**Streamlit dashboard** — closing prices for AAPL, MSFT, and GOOG from the dbt mart ([run locally](docs/DASHBOARD.md)):
+
+![Streamlit OHLCV dashboard with multi-ticker closing price chart](docs/assets/streamlit-dashboard.png)
+
+*680 rows loaded from `MARTS.FCT_STOCK_DAILY_RETURNS` in Snowflake. Tabs include candlestick, returns, volume, and raw table.*
 
 ---
 
@@ -126,7 +130,11 @@ pip install -e ".[dashboard,snowflake]"
 make dashboard
 ```
 
-Opens at `http://localhost:8501` — reads from Snowflake mart or processed CSVs. See [docs/DASHBOARD.md](docs/DASHBOARD.md).
+Opens at `http://localhost:8501` — reads from Snowflake mart or processed CSVs.
+
+![Streamlit dashboard preview](docs/assets/streamlit-dashboard.png)
+
+See [docs/DASHBOARD.md](docs/DASHBOARD.md) for setup and troubleshooting.
 
 ### 6. Docker (optional)
 
@@ -198,7 +206,11 @@ src/stock_pipeline/     Python ELT (extract, quality, Snowflake MERGE, CLI)
 dbt/                      Staging + mart models, schema tests
 config/                   Ticker lists for batch / scheduled ingest
 .github/workflows/        CI + scheduled incremental pipeline
-docs/                     Level 1 & 2 guides, assets (screenshots)
+docs/
+├── LEVEL1.md              # Snowflake load, batch, CI
+├── LEVEL2.md              # Incremental, dbt, cron, Docker
+├── DASHBOARD.md           # Streamlit dashboard guide
+└── assets/                # README screenshots
 Dockerfile                Containerized CLI (Snowflake extras)
 tests/                    Unit + integration (~87% coverage)
 ```
