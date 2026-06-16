@@ -9,10 +9,11 @@
 | **Data source** | Polygon.io REST API (`/v2/aggs`) |
 | **Warehouse** | Snowflake (`STOCK_DB`) |
 | **Transform** | dbt (staging view + daily returns mart) |
-| **Automation** | GitHub Actions cron + Docker |
+| **Dashboard** | Streamlit + Plotly ([guide](docs/DASHBOARD.md)) |
+| **Automation** | GitHub Actions cron |
 | **Quality** | Pandera schema + OHLC business rules, ~87% test coverage |
 
-**Step-by-step guides:** [Level 1 — ingest & Snowflake](docs/LEVEL1.md) · [Level 2 — incremental, dbt, cron, Docker](docs/LEVEL2.md)
+**Guides:** [Level 1](docs/LEVEL1.md) · [Level 2](docs/LEVEL2.md) · [Dashboard](docs/DASHBOARD.md)
 
 ---
 
@@ -24,7 +25,8 @@ End-to-end **ELT** for US equity daily bars:
 2. **Validate** prices, volumes, and OHLC logic before anything is persisted  
 3. **Load** raw + processed CSVs locally, then **MERGE** into Snowflake on `(ticker, date)`  
 4. **Transform** with dbt into a staging view and a mart with `daily_return_pct`  
-5. **Automate** incremental loads on a cron (and optionally run the same CLI in Docker)
+5. **Visualize** in a Streamlit dashboard (prices, returns, volume)  
+6. **Automate** incremental loads on a GitHub Actions cron
 
 Built to demonstrate patterns hiring managers expect: incremental loads, upserts, tests, CI, analytics modeling, and scheduled jobs — without hiding complexity behind a notebook.
 
@@ -50,10 +52,14 @@ flowchart LR
     S --> M[MARTS\nFCT_STOCK_DAILY_RETURNS]
   end
 
+  subgraph viz["Dashboard"]
+    M --> ST[Streamlit app]
+    C -.-> ST
+  end
+
   subgraph ops["Operations"]
     GH[GitHub Actions\ncron + secrets] --> extract
     GH --> transform
-    DK[Docker\nstock-pipeline image] -.-> extract
   end
 ```
 
@@ -113,7 +119,16 @@ export $(grep -v '^#' .env | xargs)
 make dbt-run && make dbt-test
 ```
 
-### 5. Docker (optional)
+### 5. Streamlit dashboard
+
+```bash
+pip install -e ".[dashboard,snowflake]"
+make dashboard
+```
+
+Opens at `http://localhost:8501` — reads from Snowflake mart or processed CSVs. See [docs/DASHBOARD.md](docs/DASHBOARD.md).
+
+### 6. Docker (optional)
 
 Same CLI, reproducible environment:
 
@@ -123,7 +138,7 @@ make docker-ingest-batch          # incremental batch → Snowflake
 make docker-ingest TICKER=AAPL START=2025-06-01 END=2025-06-05 SNOWFLAKE=1
 ```
 
-Secrets via `--env-file .env`; CSVs written to `./data` on the host.
+Requires Docker Desktop (or Colima). Secrets via `--env-file .env`; CSVs written to `./data` on the host.
 
 ---
 
@@ -179,6 +194,7 @@ Typical loop: edit → lint → test → commit → push (CI runs automatically)
 
 ```
 src/stock_pipeline/     Python ELT (extract, quality, Snowflake MERGE, CLI)
+  └── dashboard/        Streamlit app (reads mart or CSV)
 dbt/                      Staging + mart models, schema tests
 config/                   Ticker lists for batch / scheduled ingest
 .github/workflows/        CI + scheduled incremental pipeline
@@ -206,7 +222,7 @@ tests/                    Unit + integration (~87% coverage)
 
 ## Portfolio one-liner
 
-> I built an incremental Python ELT pipeline from Polygon into Snowflake, validated OHLCV with Pandera, modeled staging and mart tables in dbt with tests, scheduled refreshes in GitHub Actions, and packaged the ingest CLI in Docker.
+> I built an incremental Python ELT pipeline from Polygon into Snowflake, validated OHLCV with Pandera, modeled staging and mart tables in dbt with tests, scheduled refreshes in GitHub Actions, and exposed the mart in a Streamlit dashboard.
 
 ---
 

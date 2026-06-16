@@ -33,6 +33,10 @@ dbt = [
     # dbt-core pins mashumaro<3.15, but Python 3.14 needs mashumaro>=3.17 (dbt-labs/dbt-core#12098)
     "mashumaro>=3.17; python_version>='3.14'",
 ]
+dashboard = [
+    "streamlit>=1.32.0",
+    "plotly>=5.18.0",
+]
 
 [project.scripts]
 stock-ingest = "stock_pipeline.cli:app"

@@ -1,4 +1,4 @@
-.PHONY: install lint test ingest validate clean dbt-run dbt-test dbt-parse docker-check docker-build docker-ingest docker-ingest-batch
+.PHONY: install lint test ingest validate clean dbt-run dbt-test dbt-parse dashboard docker-check docker-build docker-ingest docker-ingest-batch
 
 IMAGE=stock-pipeline
 
@@ -35,6 +35,9 @@ dbt-test:
 
 dbt-parse:
 	cd $(DBT_DIR) && dbt parse --profiles-dir .
+
+dashboard:
+	streamlit run src/stock_pipeline/dashboard/app.py
 
 docker-check:
 	@command -v docker >/dev/null 2>&1 || { \
