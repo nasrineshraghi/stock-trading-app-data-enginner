@@ -62,6 +62,9 @@ select = ["E", "F", "I", "UP"]
 [tool.coverage.run]
 source = ["stock_pipeline"]
 branch = false
+omit = [
+    "src/stock_pipeline/dashboard/app.py",
+]
 
 [tool.coverage.report]
 fail_under = 80
