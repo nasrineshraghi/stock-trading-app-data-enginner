@@ -164,9 +164,11 @@ def test_load_dashboard_data_raises_when_no_sources(tmp_path: Path) -> None:
         load_dashboard_data(settings, source="auto")
 
 
+@patch("stock_pipeline.dashboard.data._require_snowflake_package")
 @patch("stock_pipeline.dashboard.data._connect")
 def test_load_mart_from_snowflake(
     mock_connect: MagicMock,
+    _mock_require_pkg: MagicMock,
     snowflake_settings: Settings,
 ) -> None:
     mock_conn = MagicMock()
@@ -186,9 +188,11 @@ def test_load_mart_from_snowflake(
     assert mock_cursor.execute.call_args.args[1] == ("AAPL",)
 
 
+@patch("stock_pipeline.dashboard.data._require_snowflake_package")
 @patch("stock_pipeline.dashboard.data._connect")
 def test_load_dashboard_data_snowflake_source(
     mock_connect: MagicMock,
+    _mock_require_pkg: MagicMock,
     snowflake_settings: Settings,
 ) -> None:
     mock_conn = MagicMock()
